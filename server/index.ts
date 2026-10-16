@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { cacheGet, cacheSet } from './cache.ts';
@@ -42,6 +43,24 @@ function requirePassword(req: Request, res: Response, next: NextFunction) {
 
 app.get('/api/config', (_req, res) => {
   res.json({ passwordRequired: !!APP_PASSWORD });
+});
+
+/** The computer's Wi-Fi/LAN addresses, so the phone-remote QR code can point at something a phone can reach. */
+app.get('/api/lan', (_req, res) => {
+  // Real Wi-Fi/Ethernet first; VPNs (Norton, Tailscale...), WSL/Hyper-V and other virtual adapters last.
+  const virtual = /vpn|wireguard|tailscale|zerotier|vethernet|wsl|hyper-v|virtual|vmware|vbox|docker|loopback/i;
+  const physical = /wi-?fi|wlan|ethernet|^en\d|^eth\d/i;
+  const cgnat = (ip: string) => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip); // 100.64/10, used by VPNs
+  const rank = (name: string, ip: string) => (virtual.test(name) || cgnat(ip) ? 2 : physical.test(name) ? 0 : 1);
+  const ips = Object.entries(os.networkInterfaces())
+    .flatMap(([name, addrs]) =>
+      (addrs ?? [])
+        .filter((n) => n.family === 'IPv4' && !n.internal && !n.address.startsWith('169.254.'))
+        .map((n) => ({ ip: n.address, rank: rank(name, n.address) })),
+    )
+    .sort((a, b) => a.rank - b.rank)
+    .map((x) => x.ip);
+  res.json({ ips });
 });
 
 app.get('/api/check-password', requirePassword, (_req, res) => {

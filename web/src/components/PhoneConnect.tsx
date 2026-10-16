@@ -7,18 +7,30 @@ export function PhoneConnect() {
   const [open, setOpen] = useState(false);
   const status = useSyncExternalStore(remoteLink.subscribe, remoteLink.getStatus);
   const [qr, setQr] = useState<string | null>(null);
-  const url = status.code ? `${location.origin}/r/${status.code}` : null;
+  const local = /^(127\.|localhost$)/.test(location.hostname);
+  // On 127.0.0.1 a phone can't reach "this computer", so point it at the computer's Wi-Fi address instead.
+  const [lanIps, setLanIps] = useState<string[]>([]);
+  const [lanIp, setLanIp] = useState<string | null>(null);
+  const origin = local ? (lanIp ? `${location.protocol}//${lanIp}:${location.port}` : null) : location.origin;
+  const url = status.code && origin ? `${origin}/r/${status.code}` : null;
 
   useEffect(() => {
     if (open) void remoteLink.connect();
-  }, [open]);
+    if (open && local && lanIps.length === 0) {
+      fetch('/api/lan')
+        .then((r) => r.json())
+        .then((d: { ips: string[] }) => {
+          setLanIps(d.ips);
+          setLanIp(d.ips[0] ?? null);
+        })
+        .catch(() => {});
+    }
+  }, [open, local, lanIps.length]);
 
   useEffect(() => {
     if (!url) return setQr(null);
     QRCode.toDataURL(url, { margin: 1, width: 220, color: { dark: '#0d0b12', light: '#ffffff' } }).then(setQr, () => setQr(null));
   }, [url]);
-
-  const local = /^(127\.|localhost)/.test(location.hostname);
 
   return (
     <>
@@ -55,10 +67,28 @@ export function PhoneConnect() {
               !status.error && <p className="muted">Creating a room…</p>
             )}
             {local && (
-              <p className="small warn">
-                This address only works on this computer. To use your phone, open the app from its online address (see README → "Put it
-                online").
-              </p>
+              <div className="small warn">
+                {lanIps.length === 0 ? (
+                  <p>Couldn’t find this computer’s Wi-Fi address. Use the online version instead (README → “Put it online”).</p>
+                ) : (
+                  <>
+                    <p>
+                      Your phone must be on the <b>same Wi-Fi</b> as this computer. If Windows asks whether Node.js may use the network,
+                      allow it on <b>private networks</b>.
+                    </p>
+                    {lanIps.length > 1 && (
+                      <p>
+                        Not connecting? Try another address:{' '}
+                        <select value={lanIp ?? ''} onChange={(e) => setLanIp(e.target.value)}>
+                          {lanIps.map((ip) => (
+                            <option key={ip}>{ip}</option>
+                          ))}
+                        </select>
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
             )}
             <button onClick={() => setOpen(false)}>Done</button>
           </div>

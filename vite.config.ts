@@ -6,8 +6,9 @@ export default defineConfig({
   envDir: import.meta.dirname,
   plugins: [react()],
   server: {
-    // Spotify no longer accepts "localhost" redirect URIs, so bind to the loopback IP.
-    host: '127.0.0.1',
+    // Listen on the home network too so a phone on the same Wi-Fi can open the remote.
+    // (Log in on the computer via http://127.0.0.1:5173 - Spotify rejects "localhost" redirects.)
+    host: '0.0.0.0',
     port: 5173,
     strictPort: true,
     proxy: { '/api': 'http://127.0.0.1:5174' },

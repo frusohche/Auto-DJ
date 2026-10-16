@@ -8,9 +8,15 @@ export function Login({ error }: { error: string | null }) {
         <h1>Auto-DJ</h1>
         <p className="muted">Turn a Spotify playlist into a live DJ set, with blends, drops and sing-along lyrics.</p>
         {hasClientId ? (
-          <button className="primary big" onClick={() => void login()}>
-            Log in with Spotify
-          </button>
+          <>
+            <button className="primary big" onClick={() => void login()}>
+              Log in with Spotify
+            </button>
+            <p className="muted small">
+              This page logs in with the redirect URI <code>{location.origin}/callback</code>. It must be listed exactly like this in
+              your Spotify app’s settings.
+            </p>
+          </>
         ) : (
           <div className="setup">
             <p>
