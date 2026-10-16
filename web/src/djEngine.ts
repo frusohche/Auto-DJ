@@ -1,6 +1,16 @@
 import { Deck, loadYouTubeApi, type DeckId } from './decks.ts';
-import { analyzeLyrics, fadeLength, incomingStart, outgoingMixPoint } from './cuePoints.ts';
-import { bpmDistance } from './music.ts';
+import {
+  analyzeLyrics,
+  bridgeTotalMs,
+  fadeLength,
+  incomingStart,
+  outgoingMixPoint,
+  planBridge,
+  type BridgePlan,
+} from './cuePoints.ts';
+import { barsToMs, bpmDistance } from './music.ts';
+import { bridge } from './bridge.ts';
+import { device } from './device.ts';
 import { orderSet } from './ordering.ts';
 import { PRESETS, type MixStyle, type TransitionType } from './styles.ts';
 import { availableSfx, playSfx, SFX_LEAD_MS, type SfxName } from './sfx.ts';
@@ -19,6 +29,13 @@ export interface Plan {
   /** Incoming song time it starts from. */
   startMs: number;
   sfxFired: boolean;
+  bridge: BridgePlan | null;
+}
+
+interface FadeState {
+  startedAt: number;
+  incomingStarted: boolean;
+  rampSent: boolean;
 }
 
 export interface Snapshot {
@@ -30,6 +47,8 @@ export interface Snapshot {
   style: MixStyle;
   masterVolume: number;
   message: string | null;
+  /** Per deck: may scripts start playback? (Phones need one user tap per deck first.) */
+  unlocked: Record<DeckId, boolean>;
 }
 
 const other = (d: DeckId): DeckId => (d === 'A' ? 'B' : 'A');
@@ -45,11 +64,12 @@ export class DJEngine {
     style: PRESETS[0],
     masterVolume: 0.9,
     message: null,
+    unlocked: { A: !device.mobile, B: !device.mobile },
   };
   private listeners = new Set<() => void>();
   decks: Record<DeckId, Deck> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private fade: { startedAt: number } | null = null;
+  private fade: FadeState | null = null;
   /** Which track is buffered on the idle deck, and the promise for that load. */
   private preloaded: { index: number; startMs: number; ready: Promise<void> } | null = null;
   private currentStartMs = 0;
@@ -82,6 +102,7 @@ export class DJEngine {
     this.decks = { A: new Deck('A', hostA), B: new Deck('B', hostB) };
     for (const d of Object.values(this.decks)) {
       d.onError = (code) => this.handleDeckError(d.id, code);
+      d.onUnlock = () => this.set({ unlocked: { ...this.snap.unlocked, [d.id]: true } });
       d.onEnded = () => {
         if (d.id !== this.snap.active || this.snap.phase !== 'playing') return;
         if (this.snap.plan) this.mixNow();
@@ -149,6 +170,13 @@ export class DJEngine {
     this.set({ tracks });
   }
 
+  /** Set a track's tempo by hand (tap tempo); remembered and preferred over looked-up BPM. */
+  setBpm(id: string, bpm: number) {
+    const rounded = Math.round(bpm * 10) / 10;
+    setPrefs(id, { bpm: rounded });
+    this.updateTrack(id, { bpm: rounded, bpmTapped: true });
+  }
+
   /** Use a different YouTube video for a track: next search result, or a pasted id. */
   changeVideo(id: string, opts: { next?: true; reset?: true; customVideoId?: string }) {
     const t = this.tracks.find((x) => x.id === id);
@@ -178,12 +206,24 @@ export class DJEngine {
     return -1;
   }
 
+  /** Phones: cue a song on each deck so the user can tap play once on both. */
+  primeDecks() {
+    if (!this.decks) return;
+    const first = this.nextPlayable(-1);
+    const second = first >= 0 ? this.nextPlayable(first) : -1;
+    const a = first >= 0 ? videoFor(this.tracks[first]) : null;
+    const b = second >= 0 ? videoFor(this.tracks[second]) : a;
+    if (a) void this.decks.A.prime(a.videoId);
+    if (b) void this.decks.B.prime(b.videoId);
+  }
+
   /** Start the set at `index`, from the top of that song. */
   async start(index = 0) {
     if (!this.decks) return;
     if (!this.playable(index)) index = this.nextPlayable(index);
     if (index < 0) return this.set({ message: 'No playable tracks yet - waiting for YouTube matches.' });
     this.fade = null;
+    bridge.stop();
     this.preloaded = null;
     this.decks.A.stop();
     this.decks.B.stop();
@@ -231,6 +271,7 @@ export class DJEngine {
 
   stopAll() {
     this.fade = null;
+    bridge.stop();
     this.preloaded = null;
     this.decks?.A.stop();
     this.decks?.B.stop();
@@ -239,14 +280,23 @@ export class DJEngine {
 
   // ---- planning ----
   private pickTransition(cur: DJTrack, next: DJTrack): TransitionType {
-    const w = { ...this.snap.style.weights };
-    if (!this.snap.style.sfxEnabled) w.sfx = 0;
-    // Big tempo jumps sound bad as long blends; DJs cut or cover them with an effect.
-    if (cur.bpm && next.bpm && bpmDistance(cur.bpm, next.bpm) > 0.08) w.blend *= 0.2;
-    const total = w.blend + w.cut + w.sfx;
-    if (total <= 0) return 'blend';
+    const style = this.snap.style;
+    const w = { ...style.weights };
+    if (!style.sfxEnabled) w.sfx = 0;
+    const s = style.bridge.sounds;
+    if (!s.drums && !s.logPiano && !s.bass) w.bridge = 0;
+    // Big tempo jumps sound bad as long blends; DJs cut, cover them with an effect or bridge with drums.
+    if (cur.bpm && next.bpm && bpmDistance(cur.bpm, next.bpm) > 0.08) {
+      w.blend *= 0.2;
+      w.bridge *= 1.5;
+    }
+    // Phones that ignore volume control (iPhone) can't crossfade.
+    if (!device.volumeControl) w.blend = 0;
+    const types = ['blend', 'cut', 'sfx', 'bridge'] as const;
+    const total = types.reduce((sum, k) => sum + w[k], 0);
+    if (total <= 0) return device.volumeControl ? 'blend' : 'cut';
     let r = Math.random() * total;
-    for (const type of ['blend', 'cut', 'sfx'] as const) if ((r -= w[type]) < 0) return type;
+    for (const type of types) if ((r -= w[type]) < 0) return type;
     return 'blend';
   }
 
@@ -262,21 +312,24 @@ export class DJEngine {
     const cur = this.tracks[this.snap.index];
     const next = this.tracks[toIndex];
     const style = this.snap.style;
-    const fadeMs = fadeOverride ?? fadeLength(style, type, cur.bpm);
-    const startMs = incomingStart(analyzeLyrics(next.lyrics, next.durationMs), type, fadeMs);
+    const bp = type === 'bridge' ? planBridge(style, cur.bpm, next.bpm) : null;
+    const fadeMs = bp ? bridgeTotalMs(bp) : (fadeOverride ?? fadeLength(style, type, cur.bpm));
+    // For bridges, the incoming song only overlaps the drums' fade-out, and the outgoing song
+    // only needs room for its short fade under the drums.
+    const startMs = incomingStart(analyzeLyrics(next.lyrics, next.durationMs), bp ? 'blend' : type, bp ? bp.inMs : fadeMs);
     const mixOutMs = outgoingMixPoint(
       analyzeLyrics(cur.lyrics, cur.durationMs),
       cur.durationMs,
       this.currentStartMs,
       style,
-      fadeMs,
+      bp ? bp.outMs : fadeMs,
     );
     // Keep an already-chosen (or already-fired) effect when replanning the same change.
     const prev = this.snap.plan;
     const same = prev && prev.toIndex === toIndex && prev.type === type;
     const sfx = type !== 'sfx' ? null : same ? prev.sfx : this.sfxPool[Math.floor(Math.random() * this.sfxPool.length)];
     const sfxFired = same ? prev.sfxFired : false;
-    this.set({ plan: { toIndex, type, sfx, fadeMs, mixOutMs, startMs, sfxFired } });
+    this.set({ plan: { toIndex, type, sfx, fadeMs, mixOutMs, startMs, sfxFired, bridge: bp } });
     this.preloadNext();
   }
 
@@ -304,10 +357,51 @@ export class DJEngine {
       }
       if (t >= plan.mixOutMs) void this.beginMix();
     } else if (phase === 'mixing' && this.fade && plan) {
-      const p = Math.min(1, (performance.now() - this.fade.startedAt) / plan.fadeMs);
+      const elapsed = performance.now() - this.fade.startedAt;
+      if (plan.bridge) return this.bridgeTick(plan.bridge, this.fade, elapsed);
+      const p = Math.min(1, elapsed / plan.fadeMs);
       this.applyFade(p);
       if (p >= 1) this.finishMix();
     }
+  }
+
+  /**
+   * Bridge timeline: [out] outgoing fades under the drums -> [solo] drums alone, tempo glides
+   * to the next song's BPM, fill in the last bar -> [in] next song fades up as the drums drop out.
+   */
+  private bridgeTick(bp: BridgePlan, fade: FadeState, elapsed: number) {
+    const v = this.snap.masterVolume;
+    const curve = (p: number) => Math.sin((Math.min(1, Math.max(0, p)) * Math.PI) / 2);
+    const soloEnd = bp.outMs + bp.soloMs;
+
+    if (elapsed < bp.outMs) {
+      const p = elapsed / bp.outMs;
+      this.activeDeck.setVolume(curve(1 - p) * v);
+      bridge.setGain(curve(p) * v);
+      if (!device.volumeControl && p > 0.5) this.activeDeck.pause();
+      return;
+    }
+    if (elapsed < soloEnd) {
+      if (this.activeDeck.volume > 0) {
+        this.activeDeck.setVolume(0);
+        this.activeDeck.pause();
+      }
+      bridge.setGain(v);
+      if (!fade.rampSent && elapsed >= bp.outMs + bp.soloMs / 2) {
+        fade.rampSent = true;
+        bridge.rampTempo(bp.toBpm, bp.soloMs / 2);
+      }
+      return;
+    }
+    if (!fade.incomingStarted) {
+      fade.incomingStarted = true;
+      this.idleDeck.setVolume(0);
+      this.idleDeck.play();
+    }
+    const p = (elapsed - soloEnd) / bp.inMs;
+    this.idleDeck.setVolume(curve(p) * v);
+    bridge.setGain(curve(1 - p) * v);
+    if (p >= 1) this.finishMix();
   }
 
   private async beginMix() {
@@ -323,9 +417,22 @@ export class DJEngine {
       this.replan();
       return;
     }
+    if (plan.bridge) {
+      const bp = plan.bridge;
+      const next = this.tracks[plan.toIndex];
+      bridge.start({
+        bpm: bp.fromBpm,
+        flavor: bp.flavor,
+        sounds: this.snap.style.bridge.sounds,
+        key: next.camelot ?? this.tracks[this.snap.index].camelot,
+        fillAfterMs: bp.outMs + bp.soloMs - barsToMs(1, bp.toBpm) - 100,
+      });
+      this.fade = { startedAt: performance.now(), incomingStarted: false, rampSent: false };
+      return;
+    }
     this.idleDeck.setVolume(0);
     this.idleDeck.play();
-    this.fade = { startedAt: performance.now() };
+    this.fade = { startedAt: performance.now(), incomingStarted: true, rampSent: false };
     if (plan.type !== 'blend') this.applyFade(0);
   }
 
@@ -339,10 +446,11 @@ export class DJEngine {
   private finishMix() {
     const plan = this.snap.plan;
     if (!plan) return;
-    if (!this.fade) {
+    if (!this.fade?.incomingStarted) {
       // Paused/skipped before the incoming deck started.
       this.idleDeck.play();
     }
+    bridge.stop();
     this.applyFade(1);
     this.activeDeck.pause();
     this.fade = null;
@@ -387,7 +495,8 @@ export class DJEngine {
     if (!this.decks) return { index, deck: active, upcoming: null };
     if (phase === 'mixing' && plan && this.fade) {
       const p = (performance.now() - this.fade.startedAt) / plan.fadeMs;
-      if (p >= 0.5) return { index: plan.toIndex, deck: other(active), upcoming: null };
+      const switched = plan.bridge ? this.fade.incomingStarted : p >= 0.5;
+      if (switched) return { index: plan.toIndex, deck: other(active), upcoming: null };
       return { index, deck: active, upcoming: plan.toIndex };
     }
     const soon = plan && phase === 'playing' && plan.mixOutMs - this.activeDeck.songTimeMs() < 8000;

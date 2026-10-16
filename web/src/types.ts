@@ -41,6 +41,8 @@ export interface DJTrack extends Track {
   bpm: number | null;
   keyOf: string | null;
   camelot: Camelot | null;
+  /** True when the BPM came from the user tapping along. */
+  bpmTapped?: boolean;
   /** Manual timing nudge (ms) added to the video offset; shifts both lyrics and cues. */
   offsetAdjustMs: number;
   errors: string[];

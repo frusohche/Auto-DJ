@@ -15,6 +15,9 @@ function ac(): AudioContext {
   return ctx;
 }
 
+/** Shared AudioContext for SFX and bridges. */
+export const audioContext = ac;
+
 function noise(c: AudioContext, seconds: number): AudioBufferSourceNode {
   const buf = c.createBuffer(1, c.sampleRate * seconds, c.sampleRate);
   const d = buf.getChannelData(0);

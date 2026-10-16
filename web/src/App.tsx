@@ -9,6 +9,9 @@ import { SetList } from './components/SetList.tsx';
 import { Decks } from './components/Decks.tsx';
 import { LyricsPane } from './components/LyricsPane.tsx';
 import { Settings } from './components/Settings.tsx';
+import { PhoneConnect } from './components/PhoneConnect.tsx';
+import { PasswordGate } from './components/PasswordGate.tsx';
+import { checkPassword, getAppPassword, PasswordError, passwordRequired } from './api.ts';
 
 export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -16,11 +19,15 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [playlist, setPlaylist] = useState<Pick<Playlist, 'id' | 'name'> | null>(null);
   const [enriching, setEnriching] = useState(false);
+  const [needPassword, setNeedPassword] = useState(false);
 
   useEffect(() => {
     completeLogin()
       .catch((e: Error) => setError(e.message))
       .finally(() => setAuthed(isLoggedIn()));
+    void (async () => {
+      if ((await passwordRequired()) && !(await checkPassword(getAppPassword()))) setNeedPassword(true);
+    })();
   }, []);
 
   useEffect(() => {
@@ -37,13 +44,24 @@ export function App() {
       setEnriching(true);
       await enrichAll(tracks, (id, patch) => engine.updateTrack(id, patch));
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof PasswordError) setNeedPassword(true);
+      else setError((e as Error).message);
     } finally {
       setEnriching(false);
     }
   }
 
   if (authed === null) return null;
+  if (needPassword)
+    return (
+      <PasswordGate
+        onOk={() => {
+          setNeedPassword(false);
+          // Resume matching for anything that was waiting on the password.
+          if (engine.tracks.length) void enrichAll(engine.tracks, (id, patch) => engine.updateTrack(id, patch));
+        }}
+      />
+    );
   if (!hasClientId || !authed) return <Login error={error} />;
 
   return (
@@ -54,6 +72,7 @@ export function App() {
           {playlist && <span className="crumb">/ {playlist.name}</span>}
         </div>
         <div className="topbar-right">
+          <PhoneConnect />
           {playlist && (
             <button className="ghost" onClick={() => (engine.stopAll(), engine.setTracks([]), setPlaylist(null))}>
               Change playlist

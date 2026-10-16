@@ -1,0 +1,21 @@
+# One-click deploy on Render (render.com): New > Blueprint > pick this repo.
+# You'll be asked for the secret values below; they're never stored in the repo.
+services:
+  - type: web
+    name: auto-dj
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_SPOTIFY_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: GETSONGBPM_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false

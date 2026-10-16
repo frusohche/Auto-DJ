@@ -32,3 +32,17 @@ export function bpmDistance(a: number, b: number): number {
 }
 
 export const barsToMs = (bars: number, bpm: number) => (bars * 4 * 60000) / bpm;
+
+/** Root pitch class (C=0) and mode for a Camelot key; inverse of parseKey. */
+export function camelotRoot(c: Camelot): { pc: number; minor: boolean } {
+  const majorPc = (((c.num + 4) % 12) * 7) % 12; // 7 is its own inverse mod 12
+  return c.letter === 'A' ? { pc: (majorPc + 9) % 12, minor: true } : { pc: majorPc, minor: false };
+}
+
+/** Fold a tempo into the 80–140 range DJs actually mix in (fixes half/double-time readings). */
+export function foldBpm(bpm: number): number {
+  let b = bpm;
+  while (b >= 140) b /= 2;
+  while (b < 80) b *= 2;
+  return b;
+}

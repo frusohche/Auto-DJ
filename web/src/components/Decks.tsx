@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { engine, type Plan } from '../djEngine.ts';
+import { engine } from '../djEngine.ts';
 import { fmt, useEngine, useFrame } from '../hooks.ts';
 import { analyzeLyrics } from '../cuePoints.ts';
+import { device } from '../device.ts';
+import { describePlan as describe } from '../planLabel.ts';
 import type { DeckId } from '../decks.ts';
 import type { DJTrack } from '../types.ts';
-
-function describe(plan: Plan, from: DJTrack | undefined, fadeBars: number): string {
-  if (plan.type === 'cut') return 'cut on the drop';
-  if (plan.type === 'sfx') return `${plan.sfx} + cut`;
-  return from?.bpm && plan.fadeMs > 2000 ? `${fadeBars}-bar blend` : `${Math.round(plan.fadeMs / 1000)}s blend`;
-}
+import { TapTempo } from './TapTempo.tsx';
 
 function Timeline({ track, songMs, markers }: { track: DJTrack; songMs: number; markers: { at: number; cls: string }[] }) {
   const sec = useMemo(() => analyzeLyrics(track.lyrics, track.durationMs), [track.lyrics, track.durationMs]);
@@ -56,6 +53,7 @@ function DeckPanel({ id, host }: { id: DeckId; host: React.RefObject<HTMLDivElem
       {track && <Timeline track={track} songMs={songMs} markers={markers} />}
       <div className="deck-foot small">
         <span>{track ? `${fmt(songMs)} / ${fmt(track.durationMs)}` : ''}</span>
+        {track && isActive && <TapTempo current={track.bpm} onBpm={(bpm) => engine.setBpm(track.id, bpm)} />}
         <div className="vu">
           <div style={{ width: `${volume * 100}%` }} />
         </div>
@@ -87,8 +85,36 @@ export function Decks() {
   else if (snap.phase === 'playing') status = 'Last track of the set';
   if (snap.message) status = snap.message;
 
+  const needsUnlock = device.mobile && (!snap.unlocked.A || !snap.unlocked.B);
+  const anyReady = snap.tracks.some((t) => t.status === 'ready');
+
   return (
     <div className="panel decks">
+      {needsUnlock && (
+        <div className="phone-note">
+          <b>Playing on this phone (experimental).</b>{' '}
+          {device.ios
+            ? 'iPhones can’t fade YouTube volume, so changes will be cuts and drum bridges instead of blends. '
+            : ''}
+          Phones only let the app control a video after you tap it once:
+          <ol>
+            <li>
+              <button disabled={!anyReady} onClick={() => engine.primeDecks()}>
+                Load decks
+              </button>{' '}
+              {!anyReady && <span className="muted small">(waiting for songs to match)</span>}
+            </li>
+            <li>
+              Tap ▶ inside <b>Deck A</b> {snap.unlocked.A ? '✅' : ''} and <b>Deck B</b> {snap.unlocked.B ? '✅' : ''}. They pause
+              straight away.
+            </li>
+            <li>Press ▶ Start the mix.</li>
+          </ol>
+          <span className="muted small">
+            For the full experience, play on a computer and use this phone as a remote (📱 Phone remote button at the top).
+          </span>
+        </div>
+      )}
       <div className="deck-row">
         <DeckPanel id="A" host={hostA} />
         <DeckPanel id="B" host={hostB} />

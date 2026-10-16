@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { bpmDistance, camelotDistance, camelotLabel, parseKey } from './music.ts';
+import { bpmDistance, camelotDistance, camelotLabel, camelotRoot, foldBpm, parseKey } from './music.ts';
 import { activeLineIndex, parseLrc } from './lrc.ts';
-import { analyzeLyrics, fadeLength, incomingStart, outgoingMixPoint } from './cuePoints.ts';
+import { analyzeLyrics, bridgeTotalMs, fadeLength, incomingStart, outgoingMixPoint, planBridge } from './cuePoints.ts';
 import { orderSet } from './ordering.ts';
 import { PRESETS } from './styles.ts';
 import type { DJTrack } from './types.ts';
@@ -95,5 +95,36 @@ describe('ordering', () => {
     const out = orderSet(set, 'build');
     expect(out[0].id).toBe('a');
     expect(out.map((x) => x.id).sort()).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+
+describe('bridges', () => {
+  it('inverts Camelot back to a root note', () => {
+    expect(camelotRoot({ num: 8, letter: 'A' })).toEqual({ pc: 9, minor: true }); // A minor
+    expect(camelotRoot({ num: 8, letter: 'B' })).toEqual({ pc: 0, minor: false }); // C major
+    for (const k of ['F#m', 'Eb', 'Bbm', 'G', 'C#m']) {
+      const c = parseKey(k)!;
+      const { pc, minor } = camelotRoot(c);
+      expect(parseKey(`${['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][pc]}${minor ? 'm' : ''}`)).toEqual(c);
+    }
+  });
+
+  it('folds half/double-time tempos into the mixing range', () => {
+    expect(foldBpm(210)).toBe(105);
+    expect(foldBpm(56)).toBe(112);
+    expect(foldBpm(118)).toBe(118);
+  });
+
+  it('plans out / solo / in sections and picks the flavour by tempo', () => {
+    const style = { ...PRESETS[0], bridge: { ...PRESETS[0].bridge, bars: 4, flavor: 'auto' as const } };
+    const p = planBridge(style, 100, 100);
+    expect(p.flavor).toBe('afrobeats');
+    expect(p.outMs).toBe(1200); // half a bar at 100 BPM
+    expect(p.soloMs).toBe(9600); // 4 bars
+    expect(p.inMs).toBe(4800); // 2 bars
+    expect(bridgeTotalMs(p)).toBe(15600);
+    expect(planBridge(style, 112, 114).flavor).toBe('amapiano');
+    expect(planBridge(style, null, null).fromBpm).toBe(style.bridge.defaultBpm);
   });
 });

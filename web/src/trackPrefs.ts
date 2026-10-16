@@ -3,6 +3,8 @@ export interface TrackPrefs {
   offsetAdjustMs?: number;
   customVideoId?: string;
   videoIdx?: number;
+  /** Tapped tempo. */
+  bpm?: number;
 }
 
 const KEY = 'autodj.trackPrefs';

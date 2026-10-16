@@ -1,6 +1,7 @@
 import type { LyricLine } from './types.ts';
 import type { MixStyle, TransitionType } from './styles.ts';
-import { barsToMs } from './music.ts';
+import { barsToMs, foldBpm } from './music.ts';
+import type { BridgeFlavor } from './bridge.ts';
 
 export interface Sections {
   vocalStartMs: number | null;
@@ -41,9 +42,40 @@ export function analyzeLyrics(lines: LyricLine[] | null, durationMs: number): Se
   return { vocalStartMs: sung[0].t, vocalEndMs: endOf(sung.length - 1), choruses };
 }
 
+export interface BridgePlan {
+  fromBpm: number;
+  toBpm: number;
+  flavor: BridgeFlavor;
+  /** Outgoing song fades under the drums. */
+  outMs: number;
+  /** Drums alone; the tempo glides from fromBpm to toBpm in the second half. */
+  soloMs: number;
+  /** Incoming song fades in over the drums. */
+  inMs: number;
+}
+
+export function planBridge(style: MixStyle, fromBpm: number | null, toBpm: number | null): BridgePlan {
+  const b = style.bridge;
+  const from = foldBpm(fromBpm ?? b.defaultBpm);
+  const to = foldBpm(toBpm ?? b.defaultBpm);
+  const flavor: BridgeFlavor = b.flavor !== 'auto' ? b.flavor : (from + to) / 2 >= 109 ? 'amapiano' : 'afrobeats';
+  const half = b.bars / 2;
+  return {
+    fromBpm: from,
+    toBpm: to,
+    flavor,
+    outMs: barsToMs(0.5, from),
+    soloMs: barsToMs(half, from) + barsToMs(b.bars - half, (from + to) / 2),
+    inMs: barsToMs(2, to),
+  };
+}
+
+export const bridgeTotalMs = (p: BridgePlan) => p.outMs + p.soloMs + p.inMs;
+
 export function fadeLength(style: MixStyle, type: TransitionType, outgoingBpm: number | null): number {
   if (type === 'cut') return outgoingBpm ? Math.max(250, 60000 / outgoingBpm) : 400; // ~1 beat
   if (type === 'sfx') return 300;
+  if (type === 'bridge') return bridgeTotalMs(planBridge(style, outgoingBpm, null));
   const ms = outgoingBpm ? barsToMs(style.fadeBars, outgoingBpm) : style.fadeFallbackMs;
   return Math.min(32000, Math.max(3000, ms));
 }
@@ -53,7 +85,7 @@ export function incomingStart(sec: Sections, type: TransitionType, fadeMs: numbe
   if (type === 'cut') return sec.choruses[0]?.startMs ?? sec.vocalStartMs ?? 0; // drop straight into the hook
   if (sec.vocalStartMs == null) return 0;
   if (type === 'sfx') return Math.max(0, sec.vocalStartMs - 2000);
-  // Blend: the first vocal lands exactly as the fade completes.
+  // Blend/bridge (fadeMs = the fade-in part): the first vocal lands exactly as the fade completes.
   return Math.max(0, sec.vocalStartMs - fadeMs);
 }
 
