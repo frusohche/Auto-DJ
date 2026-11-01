@@ -16,7 +16,7 @@ export function PasswordGate({ onOk }: { onOk: () => void }) {
   return (
     <div className="login">
       <div className="login-card">
-        <div className="login-logo">🔒</div>
+        <div className="mark big" role="img" aria-label="Ambition logo" />
         <h1>Auto-DJ</h1>
         <p className="muted">Enter the app password (the APP_PASSWORD you set on the server).</p>
         <div className="row">

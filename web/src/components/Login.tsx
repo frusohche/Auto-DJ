@@ -4,7 +4,8 @@ export function Login({ error }: { error: string | null }) {
   return (
     <div className="login">
       <div className="login-card">
-        <div className="login-logo">🎧</div>
+        <div className="mark big" role="img" aria-label="Ambition logo" />
+        <span className="eyebrow">Ambition</span>
         <h1>Auto-DJ</h1>
         <p className="muted">Turn a Spotify playlist into a live DJ set, with blends, drops and sing-along lyrics.</p>
         {hasClientId ? (

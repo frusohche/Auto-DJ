@@ -1,13 +1,14 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { cacheGet, cacheSet } from './cache.ts';
 import { searchYouTube, type Candidate } from './youtube.ts';
 import { fetchLyrics, type LyricsResult } from './lyrics.ts';
 import { fetchBpm, type BpmResult } from './bpm.ts';
 import { roomsRouter } from './rooms.ts';
+import { audioRouter } from './audio.ts';
 
 try {
   process.loadEnvFile(path.join(import.meta.dirname, '..', '.env'));
@@ -32,12 +33,30 @@ export interface MatchResponse {
   errors: string[];
 }
 
+const sameSecret = (given: string, want: string) => {
+  const a = Buffer.from(given);
+  const b = Buffer.from(want);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
+// <audio> elements can't send headers, so after a password check the browser gets an httpOnly
+// cookie for /api/audio. It holds a keyed hash, never the password itself.
+const AUDIO_COOKIE = 'autodj_audio';
+const audioToken = APP_PASSWORD ? createHmac('sha256', APP_PASSWORD).update('autodj audio v1').digest('hex') : '';
+
+function cookie(req: Request, name: string): string {
+  for (const part of (req.get('cookie') ?? '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return v.join('=');
+  }
+  return '';
+}
+
 /** Optional shared password so strangers can't spend your YouTube quota on a public deployment. */
 function requirePassword(req: Request, res: Response, next: NextFunction) {
   if (!APP_PASSWORD) return next();
-  const given = Buffer.from(String(req.get('x-app-password') ?? ''));
-  const want = Buffer.from(APP_PASSWORD);
-  if (given.length === want.length && timingSafeEqual(given, want)) return next();
+  if (sameSecret(String(req.get('x-app-password') ?? ''), APP_PASSWORD)) return next();
+  if (req.originalUrl.startsWith('/api/audio/') && sameSecret(cookie(req, AUDIO_COOKIE), audioToken)) return next();
   res.status(401).json({ error: 'App password required' });
 }
 
@@ -63,7 +82,15 @@ app.get('/api/lan', (_req, res) => {
   res.json({ ips });
 });
 
-app.get('/api/check-password', requirePassword, (_req, res) => {
+app.get('/api/check-password', requirePassword, (req, res) => {
+  if (APP_PASSWORD)
+    res.cookie(AUDIO_COOKIE, audioToken, {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: req.secure,
+      path: '/api/audio',
+      maxAge: 30 * 24 * 3600_000,
+    });
   res.json({ ok: true });
 });
 
@@ -100,6 +127,8 @@ app.get('/api/match/:trackId', requirePassword, async (req, res) => {
   const body: MatchResponse = { candidates: candidates ?? [], lyrics, bpm, errors };
   res.json(body);
 });
+
+app.use('/api/audio', requirePassword, audioRouter());
 
 app.post('/api/rooms', requirePassword);
 app.use('/api/rooms', roomsRouter());

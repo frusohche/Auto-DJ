@@ -6,7 +6,7 @@ import { enrichAll, toDJTrack } from './enrich.ts';
 import { Login } from './components/Login.tsx';
 import { PlaylistPicker } from './components/PlaylistPicker.tsx';
 import { SetList } from './components/SetList.tsx';
-import { Decks } from './components/Decks.tsx';
+import { DJBoard } from './components/DJBoard.tsx';
 import { LyricsPane } from './components/LyricsPane.tsx';
 import { Settings } from './components/Settings.tsx';
 import { PhoneConnect } from './components/PhoneConnect.tsx';
@@ -68,7 +68,7 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo">🎧</span> Auto-DJ
+          <span className="mark" role="img" aria-label="Ambition" /> Auto-DJ
           {playlist && <span className="crumb">/ {playlist.name}</span>}
         </div>
         <div className="topbar-right">
@@ -94,7 +94,7 @@ export function App() {
           {playlist ? <SetList enriching={enriching} /> : <PlaylistPicker onPick={pick} onError={setError} />}
         </section>
         <section className="col-right">
-          <Decks />
+          <DJBoard />
           <LyricsPane />
           <Settings />
         </section>
