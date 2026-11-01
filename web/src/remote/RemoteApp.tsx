@@ -57,7 +57,7 @@ export function RemoteApp() {
     return (
       <div className="remote login">
         <div className="login-card">
-          <div className="login-logo">📱</div>
+          <div className="mark big" role="img" aria-label="Ambition logo" />
           <h1>Auto-DJ remote</h1>
           {link === 'missing' && <p className="error">Room {code} wasn’t found. Check the code on the computer.</p>}
           <p className="muted">Enter the room code shown on the computer (📱 Phone remote).</p>
@@ -103,7 +103,9 @@ export function RemoteApp() {
   return (
     <div className="remote">
       <header className="remote-top">
-        <span className="brand">🎧 Auto-DJ</span>
+        <span className="brand">
+          <span className="mark" role="img" aria-label="Ambition" /> Auto-DJ
+        </span>
         <span className={`dot ${link}`}>{link === 'live' ? `Room ${code}` : 'Reconnecting…'}</span>
       </header>
 

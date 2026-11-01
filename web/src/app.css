@@ -1,17 +1,30 @@
 :root {
-  --bg: #0d0b12;
-  --panel: #17141f;
-  --panel-2: #201c2b;
-  --line: #2e2940;
-  --text: #f1eef8;
-  --muted: #9a93ad;
-  --accent: #ff7a1a;
-  --accent-2: #ffc23d;
-  --ok: #3ddc97;
-  --bad: #ff5470;
-  --vocal: rgba(255, 194, 61, 0.25);
-  --chorus: rgba(255, 122, 26, 0.55);
+  /* Ambition brand: void stage, one teal, ember as the rare warm accent (warnings, kills, solo). */
+  --bg: #04070c; /* void-900 */
+  --panel: #080d14; /* void-800 */
+  --panel-2: #0d141d; /* void-700 */
+  --line: #15202b; /* void-600 */
+  --text: #e6f2f1; /* ink */
+  --muted: #8fa4a6; /* ink-muted */
+  --faint: #56686b; /* ink-faint */
+  --accent: #00b0aa; /* tide-500 */
+  --accent-2: #5fe0da; /* tide-300 */
+  --tide-400: #1fc9c2;
+  --tide-700: #00615e;
+  --tide-900: #032624;
+  --tide-rgb: 0 176 170;
+  --ember: #f0a840;
+  --ok: #1fc9c2;
+  --bad: #f0a840;
+  --vocal: rgb(95 224 218 / 0.14);
+  --chorus: rgb(0 176 170 / 0.5);
   --radius: 12px;
+  --font-display: 'Saira Condensed', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif;
+  --font-body: Manrope, 'Segoe UI', system-ui, sans-serif;
+  --shadow-elevated: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 2px 4px rgb(0 0 0 / 0.35), 0 12px 32px -8px rgb(var(--tide-rgb) / 0.12);
+  --shadow-cta: 0 1px 0 rgb(255 255 255 / 0.35) inset, 0 6px 16px -4px rgb(var(--tide-rgb) / 0.55), 0 18px 40px -12px rgb(var(--tide-rgb) / 0.45);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: dark;
 }
 
@@ -21,15 +34,29 @@
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 80% -10%, #2a1630 0%, transparent 60%), var(--bg);
+  background:
+    radial-gradient(60% 50% at 78% 0%, rgb(var(--tide-rgb) / 0.14), transparent 70%),
+    radial-gradient(35% 30% at 10% 90%, rgb(var(--tide-rgb) / 0.06), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
   color: var(--text);
-  font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font: 15px/1.55 var(--font-body);
   min-height: 100vh;
 }
 
 h1,
 h2 {
   margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 0.95;
+}
+h1 {
+  font-size: 40px;
+  letter-spacing: -0.03em;
 }
 h2 {
   font-size: 16px;
@@ -74,16 +101,40 @@ button {
   white-space: nowrap;
 }
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: rgb(var(--tide-rgb) / 0.45);
+  color: var(--accent-2);
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
 }
 button:disabled {
   opacity: 0.45;
   cursor: default;
 }
 button.primary {
-  background: linear-gradient(135deg, var(--accent), #ff4f6d);
+  background: var(--accent);
+  color: var(--bg);
   border: none;
-  font-weight: 600;
+  font: 700 16px/1 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 10px 16px;
+  box-shadow: var(--shadow-cta);
+  transition: transform 0.3s var(--ease-spring);
+}
+button.primary:hover:not(:disabled) {
+  color: var(--bg);
+  transform: translateY(-2px) scale(1.02);
+}
+button.primary:active:not(:disabled) {
+  transform: scale(0.97);
 }
 button.ghost {
   background: transparent;
@@ -93,8 +144,8 @@ button.small {
   font-size: 12px;
 }
 button.big {
-  font-size: 17px;
-  padding: 12px 26px;
+  font-size: 20px;
+  padding: 14px 28px;
 }
 button.icon {
   padding: 4px 8px;
@@ -135,8 +186,37 @@ input[type='range'] {
   gap: 12px;
 }
 .brand {
-  font-weight: 700;
-  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 800 24px/1 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.brand .crumb {
+  font: 500 15px/1 var(--font-body);
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* The Ambition logo cropped to the head and circled A, on the void it was drawn on. */
+.mark {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #04070c url('/brand/ambition-logo.jpg') center 18% / 150% auto no-repeat;
+  -webkit-mask-image: radial-gradient(closest-side, #000 74%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 74%, transparent 100%);
+}
+.mark.big {
+  width: 128px;
+  height: 128px;
+}
+.eyebrow {
+  font: 700 12px/1 var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--tide-400);
 }
 .crumb {
   color: var(--muted);
@@ -149,8 +229,9 @@ input[type='range'] {
   align-items: center;
 }
 .banner {
-  background: #3a1220;
-  color: #ffd3dc;
+  background: rgb(240 168 64 / 0.12);
+  border-bottom: 1px solid rgb(240 168 64 / 0.35);
+  color: var(--ember);
   padding: 10px 20px;
   cursor: pointer;
 }
@@ -198,6 +279,9 @@ input[type='range'] {
 }
 .login-logo {
   font-size: 56px;
+}
+.login-card .eyebrow {
+  margin-bottom: -6px;
 }
 .setup {
   text-align: left;
@@ -273,8 +357,8 @@ input[type='range'] {
   background: var(--panel-2);
 }
 .track.now {
-  background: linear-gradient(90deg, rgba(255, 122, 26, 0.18), transparent);
-  border-color: rgba(255, 122, 26, 0.5);
+  background: linear-gradient(90deg, rgb(var(--tide-rgb) / 0.18), transparent);
+  border-color: rgb(var(--tide-rgb) / 0.5);
 }
 .track.next {
   border-color: var(--line);
@@ -322,11 +406,11 @@ input[type='range'] {
 }
 .pill.ok {
   color: var(--ok);
-  border-color: rgba(61, 220, 151, 0.35);
+  border-color: rgb(var(--tide-rgb) / 0.35);
 }
 .pill.bad {
   color: var(--bad);
-  border-color: rgba(255, 84, 112, 0.4);
+  border-color: rgb(240 168 64 / 0.4);
 }
 .bpmkey {
   display: grid;
@@ -366,7 +450,7 @@ input[type='range'] {
 }
 .mode-switch button.on {
   background: var(--accent);
-  color: #1a0f05;
+  color: var(--bg);
   font-weight: 700;
 }
 .board-grid {
@@ -408,11 +492,10 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color 0.3s;
 }
 .deck-unit.live {
   border-color: var(--accent);
-  box-shadow: 0 0 24px rgba(255, 122, 26, 0.15);
+  box-shadow: 0 0 24px rgb(var(--tide-rgb) / 0.15);
 }
 .deck-label {
   font-weight: 700;
@@ -523,7 +606,7 @@ input[type='range'] {
   display: block;
   width: 100%;
   border-radius: 6px;
-  background: #0a0810;
+  background: var(--bg);
 }
 .wave-zoom {
   height: 84px;
@@ -536,7 +619,7 @@ input[type='range'] {
   cursor: pointer;
 }
 .deck-unit.live .wave-zoom {
-  box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.5), 0 0 18px rgba(255, 122, 26, 0.12);
+  box-shadow: inset 0 0 0 1px rgb(var(--tide-rgb) / 0.5), 0 0 18px rgb(var(--tide-rgb) / 0.12);
 }
 .deck-foot {
   display: flex;
@@ -566,16 +649,16 @@ input[type='range'] {
   letter-spacing: 0.08em;
 }
 .cue-btn {
-  border-color: #b8860b;
-  color: var(--accent-2);
+  border-color: rgb(255 255 255 / 0.15);
+  color: var(--text);
 }
 .play-btn {
-  border-color: #2a8a5f;
+  border-color: rgb(var(--tide-rgb) / 0.45);
   color: var(--ok);
 }
 .play-btn.on {
-  background: rgba(61, 220, 151, 0.18);
-  box-shadow: 0 0 14px rgba(61, 220, 151, 0.35);
+  background: rgb(var(--tide-rgb) / 0.18);
+  box-shadow: 0 0 14px rgb(var(--tide-rgb) / 0.35);
 }
 
 /* stems */
@@ -596,7 +679,6 @@ input[type='range'] {
 .stems-progress div {
   height: 100%;
   background: var(--accent-2);
-  transition: width 0.5s;
 }
 .stem-row {
   display: grid;
@@ -618,17 +700,17 @@ input[type='range'] {
   border-radius: 6px;
 }
 .pad.on:not(:disabled) {
-  background: rgba(61, 220, 151, 0.16);
+  background: rgb(var(--tide-rgb) / 0.16);
   border-color: var(--ok);
   color: var(--ok);
 }
 .pad.muted {
-  background: rgba(255, 84, 112, 0.14);
+  background: rgb(240 168 64 / 0.14);
   border-color: var(--bad);
   color: var(--bad);
 }
 .pad.solo {
-  background: rgba(255, 194, 61, 0.2);
+  background: rgb(240 168 64 / 0.2);
   border-color: var(--accent-2);
   color: var(--accent-2);
 }
@@ -649,7 +731,7 @@ input[type='range'].fader.mini {
 /* mixer */
 .mixer,
 .mixer-note {
-  background: #12101a;
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 8px;
@@ -734,8 +816,8 @@ input[type='range'].fader.mini {
   stroke-linecap: round;
 }
 .knob-cap {
-  fill: #2a2536;
-  stroke: #3d3652;
+  fill: var(--panel-2);
+  stroke: rgb(255 255 255 / 0.1);
 }
 .knob-pointer {
   stroke: var(--text);
@@ -779,7 +861,7 @@ input[type='range'].fader.mini {
   content: '';
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(to top, transparent 0 4px, #12101a 4px 6px);
+  background: repeating-linear-gradient(to top, transparent 0 4px, var(--panel) 4px 6px);
 }
 .vu-cover {
   position: absolute;
@@ -853,7 +935,7 @@ input[type='range'].fader.mini {
   padding: 6px 12px;
   color: var(--muted);
   opacity: 0.55;
-  transition: color 0.25s, opacity 0.25s, transform 0.25s;
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out);
 }
 .lyric-line.past {
   opacity: 0.3;
@@ -1105,7 +1187,7 @@ button.tap:active {
 }
 .tabs button.on {
   border-color: var(--accent);
-  background: rgba(255, 122, 26, 0.15);
+  background: rgb(var(--tide-rgb) / 0.15);
 }
 .remote-lyrics .lyrics-scroll {
   height: 52vh;

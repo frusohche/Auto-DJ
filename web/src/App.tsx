@@ -68,7 +68,7 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo">🎧</span> Auto-DJ
+          <span className="mark" role="img" aria-label="Ambition" /> Auto-DJ
           {playlist && <span className="crumb">/ {playlist.name}</span>}
         </div>
         <div className="topbar-right">

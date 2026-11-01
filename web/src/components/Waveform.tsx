@@ -4,7 +4,7 @@ import type { DJTrack } from '../types.ts';
 import type { WaveData } from '../waveform.ts';
 
 // The deck's waveform, the way DJ software shows it: a zoomed view scrolling past a fixed playhead
-// (bass orange, mids yellow, highs white) and a whole-song overview with the chorus sections marked.
+// (bass teal, mids light teal, highs white) and a whole-song overview with the chorus sections marked.
 
 const ZOOM_SECONDS = 12;
 
@@ -25,14 +25,14 @@ function palette(): Colors {
     const css = getComputedStyle(document.documentElement);
     const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
     colors = {
-      low: v('--accent', '#ff7a1a'),
-      mid: v('--accent-2', '#ffc23d'),
-      high: v('--text', '#f1eef8'),
-      chorus: 'rgba(255, 122, 26, 0.16)',
-      vocal: 'rgba(255, 194, 61, 0.07)',
-      bg: v('--bg', '#0d0b12'),
-      ok: v('--ok', '#3ddc97'),
-      bad: v('--bad', '#ff5470'),
+      low: v('--accent', '#00b0aa'),
+      mid: v('--accent-2', '#5fe0da'),
+      high: v('--text', '#e6f2f1'),
+      chorus: 'rgba(0, 176, 170, 0.16)',
+      vocal: 'rgba(95, 224, 218, 0.06)',
+      bg: v('--bg', '#04070c'),
+      ok: v('--ok', '#1fc9c2'),
+      bad: v('--bad', '#f0a840'),
     };
   }
   return colors;
@@ -165,7 +165,7 @@ export function Waveform({
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(overCache.current.img, 0, 0, w, h);
     const px = Math.max(0, Math.min(w, (posSec / dur) * w));
-    ctx.fillStyle = 'rgba(13, 11, 18, 0.55)';
+    ctx.fillStyle = 'rgba(4, 7, 12, 0.6)';
     ctx.fillRect(0, 0, px, h);
     for (const m of markers) {
       ctx.fillStyle = markerColor(m.cls);

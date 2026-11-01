@@ -29,7 +29,7 @@ export function PhoneConnect() {
 
   useEffect(() => {
     if (!url) return setQr(null);
-    QRCode.toDataURL(url, { margin: 1, width: 220, color: { dark: '#0d0b12', light: '#ffffff' } }).then(setQr, () => setQr(null));
+    QRCode.toDataURL(url, { margin: 1, width: 220, color: { dark: '#04070c', light: '#ffffff' } }).then(setQr, () => setQr(null));
   }, [url]);
 
   return (
