@@ -17,6 +17,9 @@ import {
   type StemName,
 } from '../mixer.ts';
 import { Timeline } from './Timeline.tsx';
+import { Waveform } from './Waveform.tsx';
+import { useWaveform } from '../waveform.ts';
+import { videoFor } from '../types.ts';
 import { TapTempo } from './TapTempo.tsx';
 import { Knob } from './Knob.tsx';
 import { Vu } from './Vu.tsx';
@@ -110,6 +113,8 @@ function DeckUnit({ id, host }: { id: DeckId; host: React.RefObject<HTMLDivEleme
   const playing = engine.decks?.[id].isPlaying() ?? false;
   const onAir = !manual && snap.phase !== 'idle' && snap.active === id;
   const { songMs } = engine.deckTime(id);
+  const video = track ? videoFor(track) : null;
+  const wave = useWaveform(processed ? video?.videoId : null);
 
   const markers: { at: number; cls: string }[] = [];
   if (manual && track) markers.push({ at: snap.cues[id], cls: 'cue' });
@@ -135,7 +140,19 @@ function DeckUnit({ id, host }: { id: DeckId; host: React.RefObject<HTMLDivEleme
           <div className="muted small">{track?.artists.join(', ')}</div>
         </div>
       </div>
-      {track && <Timeline track={track} songMs={songMs} markers={markers} onSeek={manual ? (ms) => engine.seekDeck(id, ms) : undefined} />}
+      {track && wave && video ? (
+        <Waveform
+          track={track}
+          data={wave}
+          songMs={songMs}
+          offsetMs={video.offsetMs}
+          markers={markers}
+          live={onAir || (manual && playing)}
+          onSeek={manual ? (ms) => engine.seekDeck(id, ms) : undefined}
+        />
+      ) : (
+        track && <Timeline track={track} songMs={songMs} markers={markers} onSeek={manual ? (ms) => engine.seekDeck(id, ms) : undefined} />
+      )}
       <div className="deck-foot small">
         <span>{track ? `${fmt(songMs)} / ${fmt(track.durationMs)}` : ''}</span>
         {track && <TapTempo current={track.bpm} onBpm={(bpm) => engine.setBpm(track.id, bpm)} />}

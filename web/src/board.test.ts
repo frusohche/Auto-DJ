@@ -151,3 +151,24 @@ describe('manual mode', () => {
     expect(decks.B.volume).toBe(e.getSnapshot().masterVolume);
   });
 });
+
+describe('waveform bands', () => {
+  const sine = (hz: number, sr: number, sec: number) => Float32Array.from({ length: sr * sec }, (_, i) => Math.sin((2 * Math.PI * hz * i) / sr));
+
+  it('puts a bass tone in the low band and a hi-hat-like tone in the high band', async () => {
+    const { computeBands } = await import('./waveform.ts');
+    const sr = 22050;
+    const bass = computeBands([sine(60, sr, 1)], sr);
+    const hat = computeBands([sine(8000, sr, 1)], sr);
+    const avg = (a: Float32Array) => a.reduce((s, v) => s + v, 0) / a.length;
+    // Normalised per band, so compare raw shape via a mixed signal instead.
+    const mix = Float32Array.from(sine(60, sr, 2), (v, i) => (i < sr ? v : 0.5 * Math.sin((2 * Math.PI * 8000 * i) / sr)));
+    const m = computeBands([mix], sr);
+    const half = m.low.length / 2;
+    expect(avg(m.low.slice(2, half - 2))).toBeGreaterThan(avg(m.low.slice(half + 2)));
+    expect(avg(m.high.slice(half + 2))).toBeGreaterThan(avg(m.high.slice(2, half - 2)));
+    expect(bass.low.length).toBe(80);
+    expect(bass.durationSec).toBeCloseTo(1);
+    expect(Math.max(...hat.high)).toBeCloseTo(1);
+  });
+});

@@ -514,6 +514,30 @@ input[type='range'] {
   background: #fff;
   box-shadow: 0 0 6px #fff;
 }
+.wave {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wave canvas {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  background: #0a0810;
+}
+.wave-zoom {
+  height: 84px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.wave-over {
+  height: 26px;
+}
+.wave.seekable canvas {
+  cursor: pointer;
+}
+.deck-unit.live .wave-zoom {
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.5), 0 0 18px rgba(255, 122, 26, 0.12);
+}
 .deck-foot {
   display: flex;
   justify-content: space-between;
