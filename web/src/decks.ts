@@ -28,7 +28,29 @@ export function loadYouTubeApi(): Promise<void> {
 
 export type DeckId = 'A' | 'B';
 
-export class Deck {
+/** What the engine needs from a deck: a YouTube player (Deck) or the Web Audio deck (AudioDeck). */
+export interface DeckLike {
+  readonly id: DeckId;
+  videoId: string | null;
+  offsetMs: number;
+  volume: number;
+  unlocked: boolean;
+  onError?: (code: number) => void;
+  onEnded?: () => void;
+  onUnlock?: () => void;
+  load(videoId: string, offsetMs: number, songMs: number): Promise<void>;
+  prime(videoId: string): Promise<void>;
+  play(): void;
+  pause(): void;
+  stop(): void;
+  seekSong(ms: number): void;
+  songTimeMs(): number;
+  setOffset(ms: number): void;
+  setVolume(v: number): void;
+  isPlaying(): boolean;
+}
+
+export class Deck implements DeckLike {
   player!: YT.Player;
   videoId: string | null = null;
   /** Video time minus song time (ms). */

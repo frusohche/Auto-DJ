@@ -1,4 +1,6 @@
-import { Deck, loadYouTubeApi, type DeckId } from './decks.ts';
+import { Deck, loadYouTubeApi, type DeckId, type DeckLike } from './decks.ts';
+import { AudioDeck, audioCaps, type StemInfo } from './audioDeck.ts';
+import { flatMixer, xfadeGains, type MixerState } from './mixer.ts';
 import {
   analyzeLyrics,
   bridgeTotalMs,
@@ -18,6 +20,10 @@ import { setPrefs } from './trackPrefs.ts';
 import { videoFor, type DJTrack } from './types.ts';
 
 export type Phase = 'idle' | 'loading' | 'playing' | 'mixing' | 'paused';
+/** auto: the engine mixes. manual: the user drives both decks and the crossfader. */
+export type MixMode = 'auto' | 'manual';
+/** processed: our own Web Audio decks (EQ, FX, stems). youtube: fallback IFrame players. */
+export type AudioMode = 'processed' | 'youtube';
 
 export interface Plan {
   toIndex: number;
@@ -49,6 +55,16 @@ export interface Snapshot {
   message: string | null;
   /** Per deck: may scripts start playback? (Phones need one user tap per deck first.) */
   unlocked: Record<DeckId, boolean>;
+  audioMode: AudioMode | null;
+  mode: MixMode;
+  mixers: Record<DeckId, MixerState>;
+  stems: Record<DeckId, StemInfo>;
+  /** -1 = deck A .. +1 = deck B (manual mode). */
+  crossfader: number;
+  /** Track id loaded on each deck. */
+  deckTrack: Record<DeckId, string | null>;
+  /** Cue point (song ms) per deck, manual mode. */
+  cues: Record<DeckId, number>;
 }
 
 const other = (d: DeckId): DeckId => (d === 'A' ? 'B' : 'A');
@@ -65,9 +81,17 @@ export class DJEngine {
     masterVolume: 0.9,
     message: null,
     unlocked: { A: !device.mobile, B: !device.mobile },
+    audioMode: null,
+    mode: 'auto',
+    mixers: { A: flatMixer(), B: flatMixer() },
+    stems: { A: { status: 'off', progress: 0 }, B: { status: 'off', progress: 0 } },
+    crossfader: 0,
+    deckTrack: { A: null, B: null },
+    cues: { A: 0, B: 0 },
   };
   private listeners = new Set<() => void>();
-  decks: Record<DeckId, Deck> | null = null;
+  decks: Record<DeckId, DeckLike> | null = null;
+  private attaching: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private fade: FadeState | null = null;
   /** Which track is buffered on the idle deck, and the promise for that load. */
@@ -96,14 +120,32 @@ export class DJEngine {
     return this.decks![other(this.snap.active)];
   }
 
-  async attachDecks(hostA: HTMLElement, hostB: HTMLElement) {
-    if (this.decks) return;
-    await loadYouTubeApi();
-    this.decks = { A: new Deck('A', hostA), B: new Deck('B', hostB) };
+  attachDecks(hostA: HTMLElement, hostB: HTMLElement) {
+    this.attaching ??= this.createDecks(hostA, hostB);
+    return this.attaching;
+  }
+
+  /** Our own audio decks when the server can fetch song audio; YouTube players otherwise. */
+  private async createDecks(hostA: HTMLElement, hostB: HTMLElement) {
+    const caps = await audioCaps();
+    if (caps.ytdlp) {
+      const decks = { A: new AudioDeck('A', caps.demucs), B: new AudioDeck('B', caps.demucs) };
+      for (const d of Object.values(decks)) {
+        d.onStems = (s) => this.set({ stems: { ...this.snap.stems, [d.id]: s } });
+        d.setMixer(this.snap.mixers[d.id]);
+      }
+      this.decks = decks;
+      this.set({ audioMode: 'processed', stems: { A: decks.A.stemInfo, B: decks.B.stemInfo } });
+    } else {
+      await loadYouTubeApi();
+      this.decks = { A: new Deck('A', hostA), B: new Deck('B', hostB) };
+      this.set({ audioMode: 'youtube' });
+    }
     for (const d of Object.values(this.decks)) {
       d.onError = (code) => this.handleDeckError(d.id, code);
       d.onUnlock = () => this.set({ unlocked: { ...this.snap.unlocked, [d.id]: true } });
       d.onEnded = () => {
+        if (this.snap.mode === 'manual') return this.manualPhase();
         if (d.id !== this.snap.active || this.snap.phase !== 'playing') return;
         if (this.snap.plan) this.mixNow();
         else this.set({ phase: 'idle', message: 'End of the set.' });
@@ -154,7 +196,8 @@ export class DJEngine {
 
   setMasterVolume(v: number) {
     this.set({ masterVolume: v });
-    if (this.snap.phase === 'playing') this.activeDeck.setVolume(v);
+    if (this.snap.mode === 'manual') this.applyManualLevels();
+    else if (this.snap.phase === 'playing') this.activeDeck.setVolume(v);
   }
 
   /** Nudge song/video alignment for a track; moves lyrics and cue points together. */
@@ -175,6 +218,136 @@ export class DJEngine {
     const rounded = Math.round(bpm * 10) / 10;
     setPrefs(id, { bpm: rounded });
     this.updateTrack(id, { bpm: rounded, bpmTapped: true });
+    for (const d of ['A', 'B'] as const) if (this.snap.deckTrack[d] === id) this.deckBpm(d, rounded);
+  }
+
+  // ---- DJ board ----
+  setMixer(d: DeckId, patch: Partial<MixerState>) {
+    const deck = this.decks?.[d];
+    if (deck instanceof AudioDeck) deck.setMixer(patch);
+    this.set({ mixers: { ...this.snap.mixers, [d]: { ...this.snap.mixers[d], ...patch } } });
+  }
+
+  /** Channel meter (0..1). YouTube players can't be metered, so they report their volume. */
+  deckLevel(d: DeckId): number {
+    const deck = this.decks?.[d];
+    if (deck instanceof AudioDeck) return deck.level();
+    return deck?.isPlaying() ? deck.volume : 0;
+  }
+
+  setMode(mode: MixMode) {
+    if (mode === this.snap.mode || !this.decks) return this.set({ mode });
+    if (mode === 'manual') {
+      if (this.snap.phase === 'mixing') this.finishMix();
+      bridge.stop();
+      this.fade = null;
+      this.preloaded = null;
+      this.set({ mode, plan: null, crossfader: 0 });
+      this.applyManualLevels();
+      return this.manualPhase();
+    }
+    // Back to auto: the deck you can hear carries on, the other one stops and gets the next song.
+    const xf = xfadeGains(this.snap.crossfader);
+    const loud = (d: DeckId) => (this.decks![d].isPlaying() ? xf[d] : -1);
+    const active: DeckId = loud('B') > loud('A') ? 'B' : loud('A') >= 0 ? 'A' : this.snap.active;
+    const idle = other(active);
+    this.decks[idle].pause();
+    this.decks[idle].setVolume(0);
+    const deck = this.decks[active];
+    const index = this.indexOf(this.snap.deckTrack[active]);
+    this.set({ mode, crossfader: 0, active });
+    if (index < 0) return this.set({ phase: 'idle', plan: null, index: -1 });
+    deck.setVolume(this.snap.masterVolume);
+    this.currentStartMs = Math.max(0, deck.songTimeMs());
+    this.set({ index, phase: deck.isPlaying() ? 'playing' : 'paused', plan: null });
+    this.replan();
+  }
+
+  setCrossfader(x: number) {
+    this.set({ crossfader: Math.max(-1, Math.min(1, x)) });
+    if (this.snap.mode === 'manual') this.applyManualLevels();
+  }
+
+  /**
+   * Song picker on a deck. Manual: load it there, paused. Auto: on the live deck, blend straight
+   * to it; on the waiting deck, make it the next song.
+   */
+  loadToDeck(d: DeckId, index: number): void {
+    if (!this.playable(index) || !this.decks) return;
+    if (this.snap.mode === 'manual') {
+      this.decks[d].pause();
+      void this.loadDeck(d, index, 0);
+      this.set({ cues: { ...this.snap.cues, [d]: 0 } });
+      return this.manualPhase();
+    }
+    const live = this.snap.phase !== 'idle' && d === this.snap.active;
+    if (live || this.snap.phase === 'idle') return this.jumpTo(index);
+    if (index === this.snap.index) return;
+    this.moveTrack(index, index < this.snap.index ? this.snap.index : this.snap.index + 1);
+  }
+
+  deckPlay(d: DeckId) {
+    if (this.snap.mode !== 'manual' || !this.decks || !this.snap.deckTrack[d]) return;
+    this.decks[d].play();
+    this.set({ active: d, index: this.indexOf(this.snap.deckTrack[d]) });
+    this.manualPhase(true);
+  }
+
+  deckPause(d: DeckId) {
+    if (this.snap.mode !== 'manual' || !this.decks) return;
+    this.decks[d].pause();
+    const o = other(d);
+    if (d === this.snap.active && this.decks[o].isPlaying()) this.set({ active: o, index: this.indexOf(this.snap.deckTrack[o]) });
+    this.manualPhase();
+  }
+
+  /** CDJ-style cue: paused, it sets the cue point here; playing, it jumps back to it and stops. */
+  deckCue(d: DeckId) {
+    if (this.snap.mode !== 'manual' || !this.decks) return;
+    const deck = this.decks[d];
+    if (deck.isPlaying()) {
+      deck.pause();
+      deck.seekSong(this.snap.cues[d]);
+      this.manualPhase();
+    } else {
+      this.set({ cues: { ...this.snap.cues, [d]: Math.max(0, deck.songTimeMs()) } });
+    }
+  }
+
+  seekDeck(d: DeckId, ms: number) {
+    if (this.snap.mode !== 'manual' || !this.decks) return;
+    this.decks[d].seekSong(ms);
+  }
+
+  private applyManualLevels() {
+    if (!this.decks) return;
+    const xf = xfadeGains(this.snap.crossfader);
+    for (const d of ['A', 'B'] as const) this.decks[d].setVolume(this.snap.masterVolume * xf[d]);
+  }
+
+  /** Manual mode: phase follows whether anything is playing (lyrics and the remote read it). */
+  private manualPhase(justStarted = false) {
+    const playing = justStarted || (['A', 'B'] as const).some((d) => this.decks?.[d].isPlaying());
+    const loaded = !!(this.snap.deckTrack.A || this.snap.deckTrack.B);
+    this.set({ phase: playing ? 'playing' : loaded ? 'paused' : 'idle' });
+  }
+
+  private indexOf(id: string | null) {
+    return id ? this.tracks.findIndex((t) => t.id === id) : -1;
+  }
+
+  private deckBpm(d: DeckId, bpm: number | null) {
+    const deck = this.decks?.[d];
+    if (deck instanceof AudioDeck) deck.setBpm(bpm);
+  }
+
+  /** Load a track onto a deck and remember which one it is. */
+  private loadDeck(d: DeckId, index: number, songMs: number): Promise<void> {
+    const t = this.tracks[index];
+    const v = videoFor(t)!;
+    this.set({ deckTrack: { ...this.snap.deckTrack, [d]: t.id } });
+    this.deckBpm(d, t.bpm);
+    return this.decks![d].load(v.videoId, v.offsetMs, songMs);
   }
 
   /** Use a different YouTube video for a track: next search result, or a pasted id. */
@@ -227,9 +400,8 @@ export class DJEngine {
     this.preloaded = null;
     this.decks.A.stop();
     this.decks.B.stop();
-    this.set({ phase: 'loading', index, active: 'A', plan: null, message: null });
-    const v = videoFor(this.tracks[index])!;
-    await this.decks.A.load(v.videoId, v.offsetMs, 0);
+    this.set({ phase: 'loading', index, active: 'A', plan: null, message: null, mode: 'auto', deckTrack: { A: null, B: null } });
+    await this.loadDeck('A', index, 0);
     this.currentStartMs = 0;
     this.decks.A.setVolume(this.snap.masterVolume);
     this.decks.A.play();
@@ -238,6 +410,7 @@ export class DJEngine {
   }
 
   pause() {
+    if (this.snap.mode === 'manual') return this.deckPause(this.snap.active);
     if (this.snap.phase === 'mixing') this.finishMix();
     if (this.snap.phase !== 'playing') return;
     this.activeDeck.pause();
@@ -245,6 +418,7 @@ export class DJEngine {
   }
 
   resume() {
+    if (this.snap.mode === 'manual') return this.deckPlay(this.snap.active);
     if (this.snap.phase !== 'paused') return;
     this.activeDeck.play();
     this.set({ phase: 'playing' });
@@ -260,7 +434,12 @@ export class DJEngine {
   }
 
   /** Quick blend straight to a specific track. */
-  jumpTo(index: number) {
+  jumpTo(index: number): void {
+    if (this.snap.mode === 'manual') {
+      // Like a DJ: load it on the deck that isn't playing.
+      const d = this.decks?.[other(this.snap.active)].isPlaying() ? this.snap.active : other(this.snap.active);
+      return this.loadToDeck(d, index);
+    }
     if (!this.isLive()) return void this.start(index);
     if (!this.playable(index)) return;
     if (this.snap.phase === 'mixing') this.finishMix();
@@ -275,7 +454,7 @@ export class DJEngine {
     this.preloaded = null;
     this.decks?.A.stop();
     this.decks?.B.stop();
-    this.set({ phase: 'idle', plan: null, index: -1 });
+    this.set({ phase: 'idle', plan: null, index: -1, deckTrack: { A: null, B: null } });
   }
 
   // ---- planning ----
@@ -291,16 +470,18 @@ export class DJEngine {
       w.bridge *= 1.5;
     }
     // Phones that ignore volume control (iPhone) can't crossfade.
-    if (!device.volumeControl) w.blend = 0;
+    const canFade = device.volumeControl || this.snap.audioMode === 'processed';
+    if (!canFade) w.blend = 0;
     const types = ['blend', 'cut', 'sfx', 'bridge'] as const;
     const total = types.reduce((sum, k) => sum + w[k], 0);
-    if (total <= 0) return device.volumeControl ? 'blend' : 'cut';
+    if (total <= 0) return canFade ? 'blend' : 'cut';
     let r = Math.random() * total;
     for (const type of types) if ((r -= w[type]) < 0) return type;
     return 'blend';
   }
 
   private replan() {
+    if (this.snap.mode === 'manual') return;
     if (this.snap.phase === 'mixing' || this.snap.phase === 'loading') return;
     const toIndex = this.nextPlayable(this.snap.index);
     if (toIndex < 0) return this.set({ plan: null });
@@ -338,17 +519,17 @@ export class DJEngine {
     if (!plan || !this.decks) return;
     const p = this.preloaded;
     if (p && p.index === plan.toIndex && p.startMs === plan.startMs) return;
-    const v = videoFor(this.tracks[plan.toIndex])!;
     this.preloaded = {
       index: plan.toIndex,
       startMs: plan.startMs,
-      ready: this.idleDeck.load(v.videoId, v.offsetMs, plan.startMs),
+      ready: this.loadDeck(other(this.snap.active), plan.toIndex, plan.startMs),
     };
   }
 
   // ---- the clock ----
   private tick() {
     const { phase, plan } = this.snap;
+    if (this.snap.mode === 'manual') return;
     if (phase === 'playing' && plan) {
       const t = this.activeDeck.songTimeMs();
       if (plan.type === 'sfx' && plan.sfx && !plan.sfxFired && t >= plan.mixOutMs - SFX_LEAD_MS[plan.sfx]) {
@@ -378,7 +559,7 @@ export class DJEngine {
       const p = elapsed / bp.outMs;
       this.activeDeck.setVolume(curve(1 - p) * v);
       bridge.setGain(curve(p) * v);
-      if (!device.volumeControl && p > 0.5) this.activeDeck.pause();
+      if (!device.volumeControl && this.snap.audioMode !== 'processed' && p > 0.5) this.activeDeck.pause();
       return;
     }
     if (elapsed < soloEnd) {
@@ -462,19 +643,27 @@ export class DJEngine {
 
   private handleDeckError(deck: DeckId, code: number) {
     const isIdle = deck !== this.snap.active;
-    const index = isIdle ? this.preloaded?.index ?? this.snap.plan?.toIndex : this.snap.index;
+    const index =
+      this.snap.mode === 'manual'
+        ? this.indexOf(this.snap.deckTrack[deck])
+        : isIdle
+          ? (this.preloaded?.index ?? this.snap.plan?.toIndex)
+          : this.snap.index;
     if (index == null) return;
     const t = this.tracks[index];
     if (!t) return; // the set changed (e.g. a new playlist) while this video was loading
-    console.warn(`Deck ${deck}: YouTube error ${code} on "${t.title}"`);
+    const what =
+      this.snap.audioMode === 'processed' ? `Audio download failed (${code})` : `YouTube error ${code}: video can't be embedded`;
+    console.warn(`Deck ${deck}: ${what} on "${t.title}"`);
     const hasMore = !t.customVideoId && t.videoIdx + 1 < t.candidates.length;
     this.preloaded = isIdle ? null : this.preloaded;
     this.updateTrack(
       t.id,
       hasMore
         ? { videoIdx: t.videoIdx + 1 }
-        : { status: 'error', errors: [...t.errors, `YouTube error ${code}: video can't be embedded`] },
+        : { status: 'error', errors: [...t.errors, what] },
     );
+    if (this.snap.mode === 'manual') return this.set({ message: `Couldn't load "${t.title}" on deck ${deck}.` });
     if (!isIdle && this.snap.phase !== 'idle') {
       // The playing song died - get out fast.
       const next = hasMore ? index : this.nextPlayable(index);

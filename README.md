@@ -55,6 +55,39 @@ There are two sounds: **Afrobeats** (kick, clap, rim, shaker, congas and a bassl
 
 The app can't hear the YouTube audio, so it can't line its drums up with a song's beat. That's why the drums mostly play *between* the songs, not on top of them. For an accurate bridge tempo, tap **BPM · tap** on the playing deck (or in the phone remote) 4 or more times in time with the beat. Many Afrobeats songs have no BPM data, and those use **Tempo when a song has no BPM** (105 by default).
 
+## DJ board
+The right-hand panel is laid out like a 2-deck DJ controller (modelled on a Pioneer DDJ-FLX4):
+
+| Section | Controls |
+|---|---|
+| **Each deck** | song picker + **Load**, the song timeline, time and BPM tap. In Manual mode also **CUE** and **▶/❚❚**, and clicking the timeline seeks. |
+| **Instruments** (stems) | **VOX / DRUMS / BASS / MELODY** pads: click to mute, Shift-click or hold to solo, plus a level fader for each |
+| **Mixer channel** | **TRIM**, **HI / MID / LOW** EQ (turned fully down = kill), **FILTER** (left low-pass, right high-pass), **ECHO** (in time with the song), level meter, channel fader, **Reset** |
+| **Bottom row** | crossfader, **MASTER** knob and meter. In Auto mode also Pause and Mix now. |
+
+Knobs: drag up and down (hold Shift for fine control), scroll, or use the arrow keys. Double-click returns a knob to its default. Mixer settings stay on the deck from song to song, like real hardware.
+
+**Auto / Manual:**
+- **Auto:** the app does the transitions, and you ride the EQ, effects and instruments on top. The crossfader moves by itself to show the blend.
+- **Manual:** the auto-mixer stops, and you load, cue, play and crossfade both decks yourself. ▶ in the set list loads that song onto the deck that isn't playing. Switching back to Auto carries on from the deck you can hear.
+
+### Board setup (song audio and stems)
+EQ, filter, echo and instrument control need the song's audio, but a YouTube player keeps its sound to itself. So the server downloads the matched video's audio with **yt-dlp** and splits it into instruments with **Demucs**:
+
+```sh
+pip install yt-dlp demucs
+winget install ffmpeg        # Demucs needs ffmpeg to read the audio (macOS: brew install ffmpeg)
+```
+
+Restart `npm run dev`. The server log says which tools it found.
+- **yt-dlp only:** EQ, filter, echo, faders and the crossfader all work.
+- **+ Demucs and ffmpeg:** songs are also split into vocals, drums, bass and melody. This runs on the CPU and takes about 1–2 minutes per song. The songs on the decks always go first, and each song plays as the full mix until its stems are ready.
+- **Neither (e.g. on Render):** the board falls back to the YouTube players. Song switching, volume and the crossfader still work.
+
+Audio and stems are cached in `server/audio-cache/`. Delete that folder to free up disk space. If the tools aren't on your PATH, set `YTDLP_PATH` and/or `PYTHON_PATH` in `.env`.
+
+> Downloading YouTube audio is against YouTube's Terms of Service. The board is meant for personal use on your own computer.
+
 ## Phone
 
 ### Phone as remote (recommended)
@@ -83,7 +116,7 @@ Notes on the free plan: the server sleeps after about 15 minutes without visitor
 
 ## Limits
 - YouTube search uses about 100 of the free 10,000 daily quota units per song, so roughly 100 new songs a day. Matches are cached in `server/cache.json`, so a song you've already loaded costs nothing.
-- Audio stays inside YouTube's player, so there's no true beat-matching, EQ or filter effects. Changes are timed volume crossfades, drum bridges, cuts and overlaid SFX. Nothing is downloaded.
+- There's no true beat-matching: the app doesn't analyse the beat grid, so blends are timed from lyrics and BPM. Without yt-dlp (see **Board setup**), audio stays inside YouTube's player, and there's no EQ, filter or stem control.
 - Music videos with skits at the start may need a few presses of **Lyrics too early/late**, or a 🔗 link to an "official audio" upload.
 
 ## Scripts
